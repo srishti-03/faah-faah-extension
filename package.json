@@ -19,7 +19,32 @@
         "command": "fha-fha-extension.helloWorld",
         "title": "Hello World"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Fha Fha",
+      "properties": {
+        "fhaFha.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable Fha Fha sounds"
+        },
+        "fhaFha.errorSoundPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to error sound (.mp3). Leave empty for default faaah.mp3"
+        },
+        "fhaFha.warningSoundPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to warning sound (.mp3). Leave empty to disable warning sounds"
+        },
+        "fhaFha.debounceMs": {
+          "type": "number",
+          "default": 500,
+          "description": "Milliseconds to wait before triggering sound (prevents spam)"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

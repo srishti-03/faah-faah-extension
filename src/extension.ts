@@ -5,7 +5,7 @@ import { execFile } from 'child_process';
 let lastErrorCount = 0;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Phar Phar extension is active!');
+    console.log('Fha Fha extension is active!');
 
     // this is the even listener, it'll run whenever diagnostics (errors/warnings) change in the editor
     let disposable = vscode.languages.onDidChangeDiagnostics(e => {

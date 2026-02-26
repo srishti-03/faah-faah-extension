@@ -35,7 +35,11 @@ Trigger 3+ error sprees in a row and unlock:
 > *"Achievement Unlocked: Code Destroyer!"*
 
 ### Rage Quit Button
+<<<<<<< HEAD
 Click the 🏳️ in the status bar to give up gracefully. Your daily score (bugs survived, faaahs triggered, victories earned) gets copied to clipboard — ready to share.
+=======
+Click the 🏳️ in the status bar to give up gracefully. Your daily score gets copied to clipboard — ready to share.
+>>>>>>> 73b183a (Initial release v0.0.1 — Faah Faah extension)
 
 ### Mute Toggle
 Click the error counter in the status bar to mute/unmute all sounds.

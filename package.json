@@ -3,6 +3,11 @@
   "displayName": "fha-fha-extension",
   "description": "Makes a fha-fha sound on code errors",
   "version": "0.0.1",
+  "publisher": "fhafha-devs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/srishti-03/faah-faah-extension"
+  },
   "engines": {
     "vscode": "^1.109.0"
   },
@@ -18,6 +23,14 @@
       {
         "command": "fha-fha-extension.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "fha-fha-extension.rageQuit",
+        "title": "Fha Fha: Rage Quit"
+      },
+      {
+        "command": "fha-fha-extension.toggleMute",
+        "title": "Fha Fha: Toggle Mute"
       }
     ],
     "configuration": {
@@ -27,6 +40,16 @@
           "type": "boolean",
           "default": true,
           "description": "Enable or disable Fha Fha sounds"
+        },
+        "fhaFha.sirenSoundPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to siren/panic sound (.mp3). Leave empty for default siren.mp3"
+        },
+        "fhaFha.victorySoundPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to victory sound (.mp3). Leave empty for default victory.mp3"
         },
         "fhaFha.errorSoundPath": {
           "type": "string",

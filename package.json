@@ -2,7 +2,7 @@
   "name": "fha-fha-extension",
   "displayName": "Faah Faah: Error Sounds & Roasts",
   "description": "Your code has errors. You will be judged. Audibly.",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "icon":"logo.png",
   "publisher": "fhafha-devss",
   "repository": {
@@ -40,22 +40,22 @@
         "fhaFha.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable or disable Fha Fha sounds"
+          "description": "Enable or disable Faah Faah. You can also toggle from the status bar (bottom)."
         },
         "fhaFha.sirenSoundPath": {
           "type": "string",
           "default": "",
-          "description": "Custom path to siren/panic sound (.mp3). Leave empty for default siren.mp3"
+          "description": "Custom .mp3 file path for siren sound (.env errors). Leave empty for default siren."
         },
         "fhaFha.victorySoundPath": {
           "type": "string",
           "default": "",
-          "description": "Custom path to victory sound (.mp3). Leave empty for default victory.mp3"
+          "description": "Custom .mp3 file path for victory sound (when all errors are fixed). Leave empty for default."
         },
         "fhaFha.errorSoundPath": {
           "type": "string",
           "default": "",
-          "description": "Custom path to error sound (.mp3). Leave empty for default faaah.mp3"
+          "description": "Custom .mp3 file path for error sound. Leave empty to use default faaah sound."
         },
         "fhaFha.warningSoundPath": {
           "type": "string",
@@ -64,8 +64,9 @@
         },
         "fhaFha.debounceMs": {
           "type": "number",
-          "default": 500,
-          "description": "Milliseconds to wait before triggering sound (prevents spam)"
+          "default": 1500,
+          "description":"Delay (ms) before sound triggers after an error. Increase to avoid mid-typing sounds. Default: 1500ms"
+
         }
       }
     }

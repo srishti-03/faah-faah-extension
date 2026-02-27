@@ -1,9 +1,10 @@
 {
   "name": "fha-fha-extension",
-  "displayName": "fha-fha-extension",
-  "description": "Makes a fha-fha sound on code errors",
-  "version": "0.0.1",
-  "publisher": "fhafha-devs",
+  "displayName": "Faah Faah: Error Sounds & Roasts",
+  "description": "Your code has errors. You will be judged. Audibly.",
+  "version": "0.0.2",
+  "icon":"logo.png",
+  "publisher": "fhafha-devss",
   "repository": {
     "type": "git",
     "url": "https://github.com/srishti-03/faah-faah-extension"

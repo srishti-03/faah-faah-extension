@@ -2,7 +2,7 @@
   "name": "fha-fha-extension",
   "displayName": "Faah Faah: Error Sounds & Roasts",
   "description": "Your code has errors. You will be judged. Audibly.",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "icon": "logo.png",
   "publisher": "fhafha-devss",
   "repository": {

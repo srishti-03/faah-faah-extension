@@ -2,8 +2,8 @@
   "name": "fha-fha-extension",
   "displayName": "Faah Faah: Error Sounds & Roasts",
   "description": "Your code has errors. You will be judged. Audibly.",
-  "version": "0.0.4",
-  "icon":"logo.png",
+  "version": "0.0.5",
+  "icon": "logo.png",
   "publisher": "fhafha-devss",
   "repository": {
     "type": "git",
@@ -32,6 +32,10 @@
       {
         "command": "fha-fha-extension.toggleMute",
         "title": "Fha Fha: Toggle Mute"
+      },
+      {
+        "command": "fha-fha-extension.toggleZen",
+        "title": "Fha Fha: Toggle Zen Mode"
       }
     ],
     "configuration": {
@@ -65,8 +69,38 @@
         "fhaFha.debounceMs": {
           "type": "number",
           "default": 1500,
-          "description":"Delay (ms) before sound triggers after an error. Increase to avoid mid-typing sounds. Default: 1500ms"
-
+          "description": "Delay (ms) before sound triggers after an error. Increase to avoid mid-typing sounds. Default: 1500ms"
+        },
+        "fhaFha.triggerOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only trigger sounds on file save (Ctrl+S), not while typing. Recommended if sounds play mid-sentence."
+        },
+        "fhaFha.triggerMode": {
+          "type": "string",
+          "enum": [
+            "onType",
+            "onSave"
+          ],
+          "default": "onType",
+          "description": "onType: trigger on every diagnostic change | onSave: trigger only on file save"
+        },
+        "fhaFha.terminalSounds": {
+          "type": "boolean",
+          "default": true,
+          "description": "Play sounds when terminal commands fail or build commands succeed."
+        },
+        "fhaFha.volume": {
+          "type": "number",
+          "default": 100,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Sound volume (0–100). Default: 100"
+        },
+        "fhaFha.zenMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Zen Mode: notifications show but sounds are muted. Use Mute to silence everything."
         }
       }
     }

@@ -22,10 +22,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "fha-fha-extension.helloWorld",
-        "title": "Hello World"
-      },
-      {
         "command": "fha-fha-extension.rageQuit",
         "title": "Fha Fha: Rage Quit"
       },

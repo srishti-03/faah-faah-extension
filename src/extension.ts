@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { execFile } from 'child_process';
+import * as https from 'https';
 
 let lastErrorCount = 0;
 let lastWarningCount = 0;
@@ -8,11 +9,32 @@ let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let lastHadErrors = false;
 let errorStreak = 0;
-let dailyStats = { errors: 0, faaahs: 0, victories: 0, date: new Date().toDateString() };
+let dailyStats = { errors: 0, faaahs: 0, victories: 0, fixes: 0, hourlyErrors: new Array(24).fill(0) as number[], fileErrors: {} as Record<string, number>, date: new Date().toDateString() };
 let lastSaveTime = 0;
 let lastCheckoutTime = 0;
 let lastTypingTime = 0;
 let lastSoundPlayedAt = 0;
+let scoresBar: vscode.StatusBarItem;
+let scoresInterval: NodeJS.Timeout | undefined;
+type MatchScore = { sport: string; homeTeam: string; awayTeam: string; homeScore: string; awayScore: string; detail: string; };
+let lastScores: MatchScore[] = [];
+
+const ESPN_ENDPOINTS: Record<string, string> = {
+    'soccer-epl': 'soccer/eng.1',
+    'soccer-ucl': 'soccer/UEFA.CHAMPIONS_LEAGUE',
+    'soccer-laliga': 'soccer/esp.1',
+    'soccer-bundesliga': 'soccer/ger.1',
+    'soccer-seriea': 'soccer/ita.1',
+    'basketball-nba': 'basketball/nba',
+    'football-nfl': 'football/nfl',
+    'baseball-mlb': 'baseball/mlb',
+    'hockey-nhl': 'hockey/nhl',
+    'cricket-ipl': 'cricket/ipl',
+    'cricket-t20': 'cricket/ci.t20',
+    'cricket-odi': 'cricket/ci.odi',
+    'cricket-tests': 'cricket/ci.tests',
+
+};
 
 
 function playSound(audioPath: string, volume = 100): void {
@@ -36,15 +58,16 @@ function playSound(audioPath: string, volume = 100): void {
     }
 }
 
-function playSoundWithCooldown(audioPath: string, cooldownMs = 10000): void {
+function playSoundWithCooldown(audioPath: string, cooldownMs = 10000, volumeOverride?: number): void {
     const config = vscode.workspace.getConfiguration('fhaFha');
     if (config.get<boolean>('zenMode', false)) { return; }
     if (Date.now() - lastSoundPlayedAt < cooldownMs) { return; }
     if (!vscode.window.state.focused) { return; }
     lastSoundPlayedAt = Date.now();
-    const volume = config.get<number>('volume', 100);
-    playSound(audioPath, volume);  //pass the volume to playSound                   
+    const volume = volumeOverride ?? config.get<number>('volume', 100);
+    playSound(audioPath, volume);
 }
+
 
 
 const funnyMessages = [
@@ -80,10 +103,157 @@ function getGitUserName(): Promise<string> {
 function checkDailyReset(): void {
     const today = new Date().toDateString();
     if (dailyStats.date !== today) {
-        dailyStats = { errors: 0, faaahs: 0, victories: 0, date: today };
+        dailyStats = { errors: 0, faaahs: 0, victories: 0, fixes: 0, hourlyErrors: new Array(24).fill(0), fileErrors: {}, date: today };
     }
 }
 
+
+function httpsGet(url: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+            let data = '';
+            res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+            res.on('end', () => resolve(data));
+        }).on('error', reject);
+    });
+}
+
+async function fetchESPNScores(sportPath: string): Promise<MatchScore[]> {
+    const url = `https://site.api.espn.com/apis/site/v2/sports/${sportPath}/scoreboard`;
+    const data = JSON.parse(await httpsGet(url));
+    const matches: MatchScore[] = [];
+    for (const event of data.events || []) {
+        const comp = event.competitions?.[0];
+        if (!comp || comp.status?.type?.state !== 'in') continue;
+        const home = comp.competitors?.find((c: { homeAway: string; team: { abbreviation: string }; score: string }) => c.homeAway === 'home');
+        const away = comp.competitors?.find((c: { homeAway: string; team: { abbreviation: string }; score: string }) => c.homeAway === 'away');
+        matches.push({
+            sport: sportPath,
+            homeTeam: home?.team?.abbreviation || 'HOM',
+            awayTeam: away?.team?.abbreviation || 'AWY',
+            homeScore: home?.score || '0',
+            awayScore: away?.score || '0',
+            detail: comp.status?.displayClock || comp.status?.type?.detail || '',
+        });
+    }
+    return matches;
+}
+
+async function fetchCricketScores(apiKey: string): Promise<MatchScore[]> {
+    const data = JSON.parse(await httpsGet(`https://api.cricapi.com/v1/currentMatches?apikey=${apiKey}&offset=0`));
+    const matches: MatchScore[] = [];
+    for (const match of data.data || []) {
+        if (!match.matchStarted || match.matchEnded) continue;
+        const s0 = match.score?.[0];
+        const s1 = match.score?.[1];
+        matches.push({
+            sport: 'cricket',
+            homeTeam: match.teams?.[0] || 'T1',
+            awayTeam: match.teams?.[1] || 'T2',
+            homeScore: s0 ? `${s0.r}/${s0.w}` : '—',
+            awayScore: s1 ? `${s1.r}/${s1.w}` : '—',
+            detail: s0 ? `(${s0.o} ov)` : '',
+        });
+    }
+    return matches;
+}
+
+function scoreEmoji(sport: string): string {
+    if (sport.includes('cricket')) return '🏏';
+    if (sport.includes('soccer')) return '⚽';
+    if (sport.includes('basketball')) return '🏀';
+    if (sport.includes('football')) return '🏈';
+    if (sport.includes('baseball')) return '⚾';
+    if (sport.includes('hockey')) return '🏒';
+    return '🏆';
+}
+
+async function updateLiveScores(): Promise<void> {
+    const config = vscode.workspace.getConfiguration('fhaFha');
+    const sports = config.get<string[]>('liveScores.sports', []);
+    // const cricKey = config.get<string>('liveScores.cricketApiKey', '');
+    const showPopup = config.get<boolean>('liveScores.showScoreChangePopup', true);
+    const allScores: MatchScore[] = [];
+    for (const sport of sports) {
+        try {
+            if (ESPN_ENDPOINTS[sport]) {
+                allScores.push(...await fetchESPNScores(ESPN_ENDPOINTS[sport]));
+            }
+        } catch { /* ignore network errors */ }
+    }
+
+    if (showPopup) {
+        for (const ns of allScores) {
+            const old = lastScores.find(s => s.homeTeam === ns.homeTeam && s.awayTeam === ns.awayTeam);
+            if (old && (old.homeScore !== ns.homeScore || old.awayScore !== ns.awayScore)) {
+                vscode.window.showInformationMessage(`${scoreEmoji(ns.sport)} ${ns.homeTeam} ${ns.homeScore} – ${ns.awayScore} ${ns.awayTeam} ${ns.detail}`);
+            }
+        }
+    }
+    lastScores = allScores;
+    if (allScores.length === 0) {
+        scoresBar.text = '🏆 Live';
+        scoresBar.tooltip = 'No live matches right now. Click to toggle.';
+    } else {
+        scoresBar.text = allScores.slice(0, 2).map(s => `${scoreEmoji(s.sport)} ${s.homeTeam} ${s.homeScore}-${s.awayScore} ${s.awayTeam}`).join('  ');
+        scoresBar.tooltip = allScores.map(s => `${scoreEmoji(s.sport)} ${s.homeTeam} ${s.homeScore} – ${s.awayScore} ${s.awayTeam} ${s.detail}`).join('\n');
+    }
+    scoresBar.show();
+}
+
+function startScorePolling(): void {
+    scoresBar.text = '🏆 Live';
+    scoresBar.show();
+    updateLiveScores();
+    const mins = vscode.workspace.getConfiguration('fhaFha').get<number>('liveScores.pollIntervalMinutes', 5);
+    scoresInterval = setInterval(updateLiveScores, mins * 60 * 1000);
+}
+
+
+function stopScorePolling(): void {
+    if (scoresInterval) { clearInterval(scoresInterval); scoresInterval = undefined; }
+    scoresBar.hide();
+}
+
+function getStatsWebviewHtml(): string {
+    checkDailyReset();
+    const maxHour = Math.max(...dailyStats.hourlyErrors);
+    const peakHour = maxHour === 0 ? -1 : dailyStats.hourlyErrors.indexOf(maxHour);
+    const peakHourLabel = peakHour === -1 ? '—' : `${String(peakHour).padStart(2, '0')}:00 – ${String(peakHour + 1).padStart(2, '0')}:00`;
+    const topFiles = Object.entries(dailyStats.fileErrors).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const topFilesHtml = topFiles.length === 0
+        ? '<p style="color:#888;margin:0">No buggy files today! 🎉</p>'
+        : topFiles.map(([file, count]) =>
+            `<div class="file-row"><span class="fname">${file}</span><span class="fcount">${count}</span></div>`
+        ).join('');
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><style>
+        body{font-family:var(--vscode-font-family);background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);padding:28px;margin:0}
+        h1{font-size:1.4rem;margin:0 0 4px}
+        .date{color:var(--vscode-descriptionForeground);font-size:.85rem;margin-bottom:24px}
+        .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:28px}
+        .card{background:var(--vscode-editor-inactiveSelectionBackground);border-radius:8px;padding:18px;text-align:center}
+        .num{font-size:2.4rem;font-weight:700}
+        .red{color:#f14c4c}.green{color:#23d18b}.yellow{color:#e5c07b}.blue{color:#61afef}
+        .label{font-size:.78rem;color:var(--vscode-descriptionForeground);margin-top:6px}
+        h2{font-size:.95rem;margin:0 0 10px;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:.04em}
+        .section{margin-bottom:24px}
+        .peak{font-size:1.4rem;font-weight:700;color:#e5c07b}
+        .file-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--vscode-editorWidget-border,#3a3a3a)}
+        .fname{font-family:var(--vscode-editor-font-family,monospace);font-size:.9rem}
+        .fcount{color:#f14c4c;font-weight:700;font-size:.9rem}
+    </style></head><body>
+    <h1>📊 Today's Fha Fha Stats</h1>
+    <div class="date">${dailyStats.date}</div>
+    <div class="grid">
+        <div class="card"><div class="num red">${dailyStats.errors}</div><div class="label">Errors Made</div></div>
+        <div class="card"><div class="num green">${dailyStats.fixes}</div><div class="label">Errors Fixed</div></div>
+        <div class="card"><div class="num blue">${dailyStats.victories}</div><div class="label">Full Victories</div></div>
+        <div class="card"><div class="num yellow">${dailyStats.faaahs}</div><div class="label">Faaahs Triggered</div></div>
+    </div>
+    <div class="section"><h2>⏰ Peak Error Hour</h2><div class="peak">${peakHourLabel}</div></div>
+    <div class="section"><h2>📁 Most Buggy Files</h2>${topFilesHtml}</div>
+    </body></html>`;
+}
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Fha Fha extension is active!');
@@ -120,13 +290,20 @@ export function activate(context: vscode.ExtensionContext) {
             let currentErrorCount = 0;
             let currentWarningCount = 0;
             const ignoredPaths = ['node_modules', 'dist', 'out', '.vsix'];
-            vscode.workspace.textDocuments.forEach(doc => {
-                if (ignoredPaths.some(p => doc.uri.fsPath.includes(p))) { return; }
-                const diagnostics = vscode.languages.getDiagnostics(doc.uri);
+            const openTabUris = new Set<string>();
+            for (const group of vscode.window.tabGroups.all) {
+                for (const tab of group.tabs) {
+                    if (tab.input instanceof vscode.TabInputText) {
+                        openTabUris.add(tab.input.uri.toString());
+                    }
+                }
+            }
+            for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
+                if (!openTabUris.has(uri.toString())) { continue; }
+                if (ignoredPaths.some(p => uri.fsPath.includes(p))) { continue; }
                 currentErrorCount += diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Error).length;
                 currentWarningCount += diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Warning).length;
-            });
-
+            }
 
             if (currentErrorCount > lastErrorCount) {
                 errorStreak++;
@@ -166,21 +343,38 @@ export function activate(context: vscode.ExtensionContext) {
                     checkDailyReset();
                     dailyStats.errors += newCount;
                     dailyStats.faaahs++;
+                    dailyStats.hourlyErrors[new Date().getHours()]++;
+                    for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
+                        if (ignoredPaths.some(p => uri.fsPath.includes(p))) { continue; }
+                        const errCount = diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Error).length;
+                        if (errCount > 0) { const fn = path.basename(uri.fsPath); dailyStats.fileErrors[fn] = (dailyStats.fileErrors[fn] || 0) + errCount; }
+                    }
+
                     const defaultPath = path.resolve(__dirname, '..', 'faaah.mp3');
                     const soundPath = config.get<string>('errorSoundPath', '') || defaultPath;
                     vscode.window.showInformationMessage(`Faaah! ${newCount} new error${newCount !== 1 ? 's' : ''}! ${msg}`);
-                    const times = currentErrorCount >= 6 ? 3 : currentErrorCount >= 3 ? 2 : 1;
+                    const times = currentErrorCount >= 10 ? 3 : currentErrorCount >= 5 ? 2 : 1;
+                    const intensityVolume = currentErrorCount >= 10 ? 100 : currentErrorCount >= 5 ? 80 : 60;
+                    const gap = currentErrorCount >= 10 ? 300 : currentErrorCount >= 5 ? 500 : 800;
                     if (currentErrorCount >= 6) { flashRedBackground(); }
-                    for (let i = 0; i < times; i++) {
-                        setTimeout(() => playSoundWithCooldown(soundPath), i * 800)
+                    const zenOn = config.get<boolean>('zenMode', false);
+                    if (!zenOn && vscode.window.state.focused && Date.now() - lastSoundPlayedAt >= 10000) {
+                        lastSoundPlayedAt = Date.now();
+                        for (let i = 0; i < times; i++) {
+                            setTimeout(() => playSound(soundPath, intensityVolume), i * gap);
+                        }
                     }
+
+
                 }
                 if (errorStreak >= 3) {
                     vscode.window.showWarningMessage(`Achievement Unlocked: Code Destroyer! ${errorStreak} consecutive error sprees`);
                 }
             } else if (currentErrorCount < lastErrorCount) {
                 errorStreak = 0;
+                dailyStats.fixes += lastErrorCount - currentErrorCount;
             }
+
 
             if (currentWarningCount > lastWarningCount) {
                 const newCount = currentWarningCount - lastWarningCount;
@@ -273,6 +467,15 @@ export function activate(context: vscode.ExtensionContext) {
     zenBar.show();
     context.subscriptions.push(zenBar);
 
+    // Live Scores bar
+    scoresBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 95);
+    scoresBar.command = 'fha-fha-extension.openScoresMenu';
+    context.subscriptions.push(scoresBar);
+    if (vscode.workspace.getConfiguration('fhaFha').get<boolean>('liveScores.enabled', false)) {
+        startScorePolling();
+        scoresBar.show();
+    }
+
     context.subscriptions.push(statusBarItem);
 
     const disposable = vscode.languages.onDidChangeDiagnostics(() => {
@@ -353,17 +556,27 @@ export function activate(context: vscode.ExtensionContext) {
                     checkDailyReset();
                     dailyStats.errors += newCount;
                     dailyStats.faaahs++;
+                    dailyStats.hourlyErrors[new Date().getHours()]++;
+                    for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
+                        if (ignoredPaths.some(p => uri.fsPath.includes(p))) { continue; }
+                        const errCount = diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Error).length;
+                        if (errCount > 0) { const fn = path.basename(uri.fsPath); dailyStats.fileErrors[fn] = (dailyStats.fileErrors[fn] || 0) + errCount; }
+                    }
+
 
                     const defaultPath = path.resolve(__dirname, '..', 'faaah.mp3');
                     const soundPath = config.get<string>('errorSoundPath', '') || defaultPath;
                     vscode.window.showInformationMessage(`Faaah! ${newCount} new error${newCount !== 1 ? 's' : ''}! ${msg}`);
-                    const times = currentErrorCount >= 6 ? 3 : currentErrorCount >= 3 ? 2 : 1;
-                    if (currentErrorCount >= 6) {
-                        flashRedBackground();
-                    }
-
-                    for (let i = 0; i < times; i++) {
-                        setTimeout(() => playSoundWithCooldown(soundPath), i * 800);
+                    const times = currentErrorCount >= 10 ? 3 : currentErrorCount >= 5 ? 2 : 1;
+                    const intensityVolume = currentErrorCount >= 10 ? 100 : currentErrorCount >= 5 ? 80 : 60;
+                    const gap = currentErrorCount >= 10 ? 300 : currentErrorCount >= 5 ? 500 : 800;
+                    if (currentErrorCount >= 6) { flashRedBackground(); }
+                    const zenOn = config.get<boolean>('zenMode', false);
+                    if (!zenOn && vscode.window.state.focused && Date.now() - lastSoundPlayedAt >= 10000) {
+                        lastSoundPlayedAt = Date.now();
+                        for (let i = 0; i < times; i++) {
+                            setTimeout(() => playSound(soundPath, intensityVolume), i * gap);
+                        }
                     }
                 }
 
@@ -372,8 +585,8 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             } else if (currentErrorCount < lastErrorCount) {
                 errorStreak = 0;
+                dailyStats.fixes += lastErrorCount - currentErrorCount;
             }
-
 
             if (currentWarningCount > lastWarningCount) {
                 const newCount = currentWarningCount - lastWarningCount;
@@ -418,6 +631,7 @@ export function activate(context: vscode.ExtensionContext) {
         const scoreText = `🔥 I survived ${dailyStats.errors} bugs, triggered ${dailyStats.faaahs} Faaahs, and earned ${dailyStats.victories} victories today with the Faah Faah Extension for VS Code! 🐛`;
         vscode.env.clipboard.writeText(scoreText);
         vscode.window.showInformationMessage('I Give Up 🏳️ Score copied to clipboard — share karo!');
+        vscode.commands.executeCommand('fha-fha-extension.viewStats');
     });
 
     context.subscriptions.push(rageQuitCommand);
@@ -438,6 +652,91 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
     context.subscriptions.push(toggleZenCommand);
+
+
+    const toggleScoresCommand = vscode.commands.registerCommand('fha-fha-extension.toggleLiveScores', () => {
+        const cfg = vscode.workspace.getConfiguration('fhaFha');
+        const current = cfg.get<boolean>('liveScores.enabled', false);
+        cfg.update('liveScores.enabled', !current, vscode.ConfigurationTarget.Global);
+        if (!current) {
+            startScorePolling();
+            vscode.window.showInformationMessage('Live Scores ON 🏆 — Go to Settings to pick your sports.');
+        } else {
+            stopScorePolling();
+            vscode.window.showInformationMessage('Live Scores OFF');
+        }
+    });
+    context.subscriptions.push(toggleScoresCommand);
+
+    const checkScoresNowCommand = vscode.commands.registerCommand('fha-fha-extension.checkScoresNow', () => {
+        updateLiveScores().then(() => {
+            if (lastScores.length === 0) {
+                vscode.window.showInformationMessage('🏆 No live matches right now.');
+            }
+        });
+    }
+
+    );
+    context.subscriptions.push(checkScoresNowCommand);
+    const openScoresMenuCommand = vscode.commands.registerCommand('fha-fha-extension.openScoresMenu', async () => {
+        const SPORTS_LIST = [
+            { label: '🏏 Cricket - IPL', id: 'cricket-ipl' },
+            { label: '🏏 Cricket - T20', id: 'cricket-t20' },
+            { label: '🏏 Cricket - ODI', id: 'cricket-odi' },
+            { label: '🏏 Cricket - Tests', id: 'cricket-tests' },
+            { label: '⚽ Soccer - EPL', id: 'soccer-epl' },
+            { label: '⚽ Soccer - Champions League', id: 'soccer-ucl' },
+            { label: '⚽ Soccer - La Liga', id: 'soccer-laliga' },
+            { label: '⚽ Soccer - Bundesliga', id: 'soccer-bundesliga' },
+            { label: '⚽ Soccer - Serie A', id: 'soccer-seriea' },
+            { label: '🏀 Basketball - NBA', id: 'basketball-nba' },
+            { label: '🏈 Football - NFL', id: 'football-nfl' },
+            { label: '⚾ Baseball - MLB', id: 'baseball-mlb' },
+            { label: '🏒 Hockey - NHL', id: 'hockey-nhl' },
+        ];
+        const cfg = vscode.workspace.getConfiguration('fhaFha');
+        const currentSports = cfg.get<string[]>('liveScores.sports', []);
+        const picks = await vscode.window.showQuickPick(
+            SPORTS_LIST.map(s => ({ label: s.label, id: s.id, picked: currentSports.includes(s.id) })),
+            { canPickMany: true, title: '🏆 Live Scores — Select Sports', placeHolder: 'Choose sports to track' }
+        );
+        if (!picks) return;
+        const selected = picks.map((p: { id: string }) => p.id);
+        await cfg.update('liveScores.sports', selected, vscode.ConfigurationTarget.Global);
+        if (selected.length > 0) {
+            const enabled = cfg.get<boolean>('liveScores.enabled', false);
+            if (!enabled) {
+                await cfg.update('liveScores.enabled', true, vscode.ConfigurationTarget.Global);
+                startScorePolling();
+            } else {
+                updateLiveScores();
+            }
+        }
+    });
+    context.subscriptions.push(openScoresMenuCommand);
+
+    const configWatcher = vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('fhaFha.liveScores.enabled')) {
+            const enabled = vscode.workspace.getConfiguration('fhaFha').get<boolean>('liveScores.enabled', false);
+            if (enabled) {
+                startScorePolling();
+            } else {
+                stopScorePolling();
+            }
+        }
+        if (e.affectsConfiguration('fhaFha.liveScores.sports')) {
+            const enabled = vscode.workspace.getConfiguration('fhaFha').get<boolean>('liveScores.enabled', false);
+            if (enabled) {
+                updateLiveScores(); // Sports change hone par turant refresh
+            }
+        }
+    });
+    context.subscriptions.push(configWatcher);
+    const viewStatsCommand = vscode.commands.registerCommand('fha-fha-extension.viewStats', () => {
+        const panel = vscode.window.createWebviewPanel('fhaFhaStats', '📊 Fha Fha: Today\'s Stats', vscode.ViewColumn.One, {});
+        panel.webview.html = getStatsWebviewHtml();
+    });
+    context.subscriptions.push(viewStatsCommand);
 
     context.subscriptions.push(disposable);
 

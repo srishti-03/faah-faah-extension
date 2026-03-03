@@ -2,7 +2,7 @@
   "name": "fha-fha-extension",
   "displayName": "Faah Faah: Error Sounds & Roasts",
   "description": "Your code has errors. You will be judged. Audibly.",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "icon": "logo.png",
   "publisher": "fhafha-devss",
   "repository": {
@@ -36,6 +36,22 @@
       {
         "command": "fha-fha-extension.toggleZen",
         "title": "Fha Fha: Toggle Zen Mode"
+      },
+      {
+        "command": "fha-fha-extension.toggleLiveScores",
+        "title": "Fha Fha: Toggle Live Scores"
+      },
+      {
+        "command": "fha-fha-extension.checkScoresNow",
+        "title": "Fha Fha: Check Scores Now"
+      },
+      {
+        "command": "fha-fha-extension.openScoresMenu",
+        "title": "Fha Fha: Open Scores Menu"
+      },
+      {
+        "command": "fha-fha-extension.viewStats",
+        "title": "Fha Fha: View Today's Stats"
       }
     ],
     "configuration": {
@@ -68,8 +84,8 @@
         },
         "fhaFha.debounceMs": {
           "type": "number",
-          "default": 1500,
-          "description": "Delay (ms) before sound triggers after an error. Increase to avoid mid-typing sounds. Default: 1500ms"
+          "default": 2000,
+          "description": "Delay (ms) before sound triggers after an error. Increase to avoid mid-typing sounds. Default: 2000ms"
         },
         "fhaFha.triggerOnSave": {
           "type": "boolean",
@@ -101,6 +117,46 @@
           "type": "boolean",
           "default": false,
           "description": "Zen Mode: notifications show but sounds are muted. Use Mute to silence everything."
+        },
+        "fhaFha.liveScores.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable live sports score updates in the status bar and popup notifications."
+        },
+        "fhaFha.liveScores.sports": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "cricket-ipl",
+              "cricket-t20",
+              "cricket-odi",
+              "cricket-tests",
+              "soccer-epl",
+              "soccer-ucl",
+              "soccer-laliga",
+              "soccer-bundesliga",
+              "soccer-seriea",
+              "basketball-nba",
+              "football-nfl",
+              "baseball-mlb",
+              "hockey-nhl"
+            ]
+          },
+          "default": [],
+          "description": "Sports to show live scores for. Add/remove as needed."
+        },
+        "fhaFha.liveScores.pollIntervalMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "How often to fetch live scores (in minutes). Default: 5"
+        },
+        "fhaFha.liveScores.showScoreChangePopup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a popup notification when a score changes (goal, wicket, basket, etc.)"
         }
       }
     }
